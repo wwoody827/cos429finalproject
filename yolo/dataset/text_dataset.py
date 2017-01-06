@@ -7,7 +7,8 @@ import math
 import random
 import cv2
 import numpy as np
-from queue import Queue 
+# from queue import Queue 
+from multiprocessing import Queue
 from threading import Thread
 
 from yolo.dataset.dataset import DataSet 
