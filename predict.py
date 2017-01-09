@@ -62,7 +62,7 @@ predicts = net.inference(image)
 
 sess = tf.Session()
 
-np_img = cv2.imread('cat.jpg')
+np_img = cv2.imread('testimage/airplane.jpg')
 resized_img = cv2.resize(np_img, (448, 448))
 np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
 
@@ -83,5 +83,5 @@ print xmin, ymin, ymax, class_num
 class_name = classes_name[class_num]
 cv2.rectangle(resized_img, (int(xmin), int(ymin)), (int(xmax), int(ymax)), (0, 0, 255))
 cv2.putText(resized_img, class_name, (int(xmin), int(ymin)), 2, 1.5, (0, 0, 255))
-cv2.imwrite('cat_out.jpg', resized_img)
+cv2.imwrite('image_out.jpg', resized_img)
 sess.close()
