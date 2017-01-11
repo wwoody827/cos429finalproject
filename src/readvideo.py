@@ -4,6 +4,7 @@ import video
 from common import anorm2, draw_str
 from time import clock
 
+
 lk_params = dict( winSize  = (15, 15),
                   maxLevel = 2,
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
@@ -60,7 +61,9 @@ while True:
                 continue
 
             new_tracks.append([x, y])
-            cv2.circle(vis, (x, y), 4, (0, 255, 0), -1)
+            # cv2.circle(vis, (x, y), 4, (0, 255, 0), -1)
+            cv2.rectangle(vis, (int(x - 10), int(y - 10)), (int(x + 10), int(y + 10)), (0, 0, 255))
+            # cv2.putText(vis, class_name, (int(xmin), int(ymin)), 2, 1.5, (0, 0, 255))
 
         tracks = new_tracks
 
