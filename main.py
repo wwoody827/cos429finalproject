@@ -11,12 +11,11 @@ import video
 from common import anorm2, draw_str
 from time import clock
 
-
 classes_name = ["aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow",
                 "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"]
 
 
-lk_params = dict( winSize  = (15, 15),
+lk_params = dict( winSize  = (20, 20),
                   maxLevel = 2,
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 
@@ -25,8 +24,37 @@ feature_params = dict( maxCorners = 500,
                        minDistance = 7,
                        blockSize = 7 )
 
+video_src = 'videos/traffic4.mp4'
 
-video_src = 'videos/traffic.mp4'
+
+class TrackingObject:
+    def __init__(self, id, position, class_num):
+        self.threshold = 3
+        self.maxBalance = 6
+        self.id = id
+        self.size = [50, 50]
+        self.position = position
+        self.class_num = class_num
+        self.balance = 1
+        self.realObj = False
+
+    def addbalance(self):
+        self.balance = min(self.balance + 1, self.maxBalance)
+
+
+    def reducebalance(self):
+        self.balance = max(self.balance - 0.5, 0)
+
+
+def isInsideBox(box, position, percent):
+    xMin = box[0] + (box[2] - box[0]) *(1 - percent )/2
+    xMax = box[2] - (box[2] - box[0]) *(1 - percent )/2
+    yMin = box[1] + (box[3] - box[1]) *(1 - percent )/2
+    yMax = box[3] - (box[3] - box[1]) *(1 - percent )/2
+
+    return position[0] > xMin and position[0] < xMax and position[1] > yMin and position[1] < yMax
+
+
 
 def process_predicts(predicts):
     p_classes = predicts[0, :, :, 0:20]
@@ -69,11 +97,11 @@ def process_predicts(predicts):
         w = w * 448
         h = h * 448
 
-        xmin.append(xcenter - w / 4.0)
-        ymin.append(ycenter - h / 4.0)
+        xmin.append(xcenter - w / 3.0)
+        ymin.append(ycenter - h / 3.0)
 
-        xmax.append(xcenter + w / 4.0)
-        ymax.append(ycenter + h / 4.0)
+        xmax.append(xcenter + w / 3.0)
+        ymax.append(ycenter + h / 3.0)
 
     return xmin, ymin, xmax, ymax, class_num, prob
 
@@ -106,20 +134,22 @@ frame_idx = 0
 
 track_len = 10
 detect_interval = 5
-tracks = []
 
-tracks.append([100, 100])
-tracks.append([200, 200])
-tracks.append([250, 250])
-tracks.append([300, 250])
 
 # main loop
 prev_box = []
+
+trackingObjects = []
+totalObjects = np.zeros(20)
+
+
 while(cap.isOpened()):
     print "frame:", frame_idx
-    ret, np_img = cap.read()
-    resized_img = cv2.resize(np_img, (448, 448))
-    resized_img = cv2.resize(np_img, (448, 448))
+    ret, original = cap.read()
+    print original.shape
+    crop_img = original[300:720, 400:820]
+    # crop_img = original
+    resized_img = cv2.resize(crop_img, (448, 448))
     np_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
     frame_gray = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
     vis = resized_img.copy()
@@ -137,24 +167,29 @@ while(cap.isOpened()):
     prob = sorted(prob, reverse=True)
     boxes = zip(xmin, ymin, xmax, ymax)
     boxes = np.array([boxes[i] for i in sortedIndex])
-    boxes, index_suppress = nonmax.non_max_suppression(boxes, 0.5)
+    print "box_before", len(boxes)
+    boxes, index_suppress = nonmax.non_max_suppression(boxes, 0.4)
+    print "box_after", len(boxes)
+    classes = [class_num[i] for i in index_suppress]
 
-    classes = [classes_name[i] for i in class_num]
+    # print "number of boxes:", len(xmin)
+    # print "Class:", classes
+    # print "Prob: ", prob
+    # print "boxes:", boxes
+    # print "index:", index_suppress
 
-    print "number of boxes:", len(xmin)
-    print "Class:", classes
-    print "Prob: ", prob
-    print "boxes:", boxes
-    print "index:", index_suppress
+    for n in range(len(boxes)):
+        cv2.rectangle(vis, (int(boxes[n, 0]),
+            int(boxes[n, 1])), (int(boxes[n, 2]), int(boxes[n, 3])), (0, 0, 255))
 
-    prev_box = boxes
-
-
-    if frame_idx > 0 and len(prev_box) != 0:
+    if frame_idx > 0 and len(trackingObjects) != 0:
         # tracking:
-        tracks = []
-        for n in range(len(prev_box)):
-            tracks.append([(boxes[n,0]+boxes[n,2])/2,(boxes[n,1]+boxes[n,3])/2 ])
+
+        tracks = [];
+
+        for n in range(len(trackingObjects)):
+            pos = trackingObjects[n].position
+            tracks.append(pos)
 
         img0, img1 = prev_gray, frame_gray
 
@@ -164,31 +199,102 @@ while(cap.isOpened()):
         p0r, st, err = cv2.calcOpticalFlowPyrLK(img1, img0, p1, None, **lk_params)
 
         d = abs(p0-p0r).reshape(-1, 2).max(-1)
-        good = d < 1
+        good = d < 10
         new_tracks = []
 
-        # draw tracking results
-        for tr, (x, y), good_flag in zip(tracks, p1.reshape(-1, 2), good):
-            tr.append((x, y))
-            if x > 400:
-                continue
+        newtrackingObj = []
 
-            new_tracks.append([x, y])
-            # cv2.circle(vis, (x, y), 4, (0, 255, 0), -1)
-            cv2.rectangle(vis, (int(x - 10), int(y - 10)), (int(x + 10), int(y + 10)), (0, 255, 255))
-            # cv2.putText(vis, class_name, (int(xmin), int(ymin)), 2, 1.5, (0, 0, 255))
+        for n in range(len(trackingObjects)):
+            if good[n]:
+                trackingObjects[n].position = p1[n].tolist()[0]
+                newtrackingObj.append(trackingObjects[n])
+        trackingObjects = newtrackingObj
+
+        # # draw tracking results
+        # for tr, (x, y), good_flag in zip(tracks, p1.reshape(-1, 2), good):
+        #     tr.append((x, y))
+        #     if x > 400:
+        #         continue
+        #
+        #     new_tracks.append([x, y])
+        #     # cv2.circle(vis, (x, y), 4, (0, 255, 0), -1)
+        #     cv2.rectangle(vis, (int(x - 10), int(y - 10)), (int(x + 10), int(y + 10)), (0, 255, 255))
+        #     # cv2.putText(vis, class_name, (int(xmin), int(ymin)), 2, 1.5, (0, 0, 255))
+
+        ## end tracking
+
 
     prev_gray = frame_gray
 
+    # update trackingObjects
+    if len(trackingObjects) == 0:
+        for n in range(len(boxes)):
+            objId = np.sum(totalObjects)
+            position = [(boxes[n,0]+boxes[n,2])/2, (boxes[n,1]+boxes[n,3])/2 ]
+            class_num = classes[n]
+            newobject = TrackingObject(objId, position, class_num)
+            newobject.size = [(boxes[n,2]-boxes[n,0]), (boxes[n,3]+boxes[n,1]) ]
+            # totalObjects[class_num] = totalObjects[class_num] + 1
+
+            trackingObjects.append(newobject)
+    else:
+        boxFind = np.zeros(len(boxes))
+        newtrackingObj = []
+        for n in range(len(trackingObjects)):
+            currentObj = trackingObjects[n]
+            position = currentObj.position
+            foundBoxes = False
+
+            for m in range(len(boxes)):
+                box = boxes[m]
+                #if isInsideBox(box, position, 1) and classes[m] == currentObj.class_num:
+                if isInsideBox(box, position, 1):
+
+                    # currentObj.position = [(box[0]+box[2])/2, (box[1]+box[3])/2]
+                    currentObj.addbalance()
+                    currentObj.size = [box[2] - box[0], (box[3] - box[1])]
+                    if currentObj.realObj == False and currentObj.balance >= currentObj.threshold:
+                        currentObj.realObj = True
+                        totalObjects[currentObj.class_num] = totalObjects[currentObj.class_num]  + 1
+                    boxFind[m] = 1
+                    foundBoxes = True
+                    break
+            if ~foundBoxes:
+                currentObj.reducebalance()
+            if currentObj.balance > 0:
+                newtrackingObj.append(currentObj)
+
+        trackingObjects = newtrackingObj
+
+        for n in range(len(boxes)):
+            if boxFind[n] == 0:
+                objId = np.sum(totalObjects)
+                position = [(boxes[n,0]+boxes[n,2])/2, (boxes[n,1]+boxes[n,3])/2 ]
+                class_num = classes[n]
+                newobject = TrackingObject(objId, position, class_num)
+                newobject.size = [(boxes[n,2]-boxes[n,0]), (boxes[n,3]-boxes[n,1])]
+                # totalObjects[class_num] = totalObjects[class_num] + 1
+
+                trackingObjects.append(newobject)
+
+
     # draw:
-    for i in range(len(boxes)):
-        class_name = classes_name[class_num[i]]
-        cv2.rectangle(vis, (int(boxes[i,0]), int(
-            boxes[i,1])), (int(boxes[i,2]), int(boxes[i,3])), (0, 0, 255))
-    #    cv2.putText(resized_img, class_name[i], (int(xmin[i]), int(ymin[i])), 2, 1.5, (0, 0, 255))
+    for i in range(len(trackingObjects)):
+        thisObj = trackingObjects[i]
+        print thisObj.realObj
+        if thisObj.realObj == True:
+            class_name = classes_name[thisObj.class_num]
+            pos = thisObj.position
+            size = thisObj.size
+            cv2.rectangle(vis, (int(pos[0] - size[0]/2),
+                int(pos[1] -  size[1]/2)), (int(pos[0] + size[0]/2), int(pos[1] + size[1]/2)), (0, 255, 255))
+        #    cv2.putText(resized_img, class_name[i], (int(xmin[i]), int(ymin[i])), 2, 1.5, (0, 0, 255))
+
     cv2.imshow('cars', vis)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(25) & 0xFF == ord('q'):
         break
+
+    print "Sum of tracked objects:", np.sum(totalObjects)
 
     frame_idx = frame_idx + 1
 

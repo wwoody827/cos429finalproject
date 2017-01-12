@@ -43,7 +43,7 @@ def non_max_suppression(boxes, overlapThresh):
 
 			SU = min(area[n], area[m])
 			print "SI:", SI, "SU:", SU
-			overlap = SI/SU
+			overlap = 1.0* SI/SU
 
 			if overlap > overlapThresh:
 				index_remain[m] = 0
@@ -55,15 +55,6 @@ def non_max_suppression(boxes, overlapThresh):
 	box_suppressed = boxes[np.array(index_pick), :]
 
 	return box_suppressed, index_pick
-
-
-
-
-
-
-
-
-
 
 
 
